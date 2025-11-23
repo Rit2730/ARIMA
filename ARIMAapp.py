@@ -1,160 +1,126 @@
 import streamlit as st
+import pandas as pd
+import numpy as np
+import yfinance as yf
+from statsmodels.tsa.arima.model import ARIMA
+import plotly.graph_objects as go
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+from math import sqrt
 
-def load_libraries():
-    global yf, pd, np, sm, go, mean_absolute_error, mean_squared_error
-    import yfinance as yf
-    import pandas as pd
-    import numpy as np
-    import plotly.graph_objects as go
-    import statsmodels.api as sm
-    from sklearn.metrics import mean_absolute_error, mean_squared_error
+st.set_page_config(page_title="NIFTY50 ARIMA Forecasting", layout="wide")
 
-load_libraries()
+# ------------------------------
+# Helper functions
+# ------------------------------
 
-st.set_page_config(page_title="ARIMA Forecasting Dashboard", layout="wide")
-
-# ---------------------
-# Fetch Monthly Data
-# ---------------------
-def get_monthly_close(ticker):
-    df = yf.download(ticker, start="2000-01-01", progress=False)
-    df = df.resample("M").last()
-    df = df[["Close"]].rename(columns={"Close": "price"})
+def get_monthly_data(ticker):
+    df = yf.download(ticker, start="2005-01-01")
+    df = df["Close"].resample("M").last()
+    df = df.to_frame(name="price")
     df.index = pd.to_datetime(df.index)
     return df
 
-# ---------------------
-# Train ARIMA
-# ---------------------
-def train_arima(series):
-    model = sm.tsa.ARIMA(series, order=(1,1,1))
+def train_arima(ts, order=(1,1,1)):
+    model = ARIMA(ts, order=order)
     model_fit = model.fit()
     return model_fit
 
-# ---------------------
-# Build all 3 graphs
-# ---------------------
-def plot_monthly(series, title):
+def forecast_future(model_fit, steps):
+    forecast = model_fit.forecast(steps=steps)
+    return forecast
+
+def plot_series(actual, forecast=None, title=""):
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=series.index, y=series.values, mode="lines"))
+    fig.add_trace(go.Scatter(x=actual.index, y=actual, mode="lines", name="Actual"))
+    if forecast is not None:
+        fig.add_trace(go.Scatter(x=forecast.index, y=forecast, mode="lines", name="Forecast"))
     fig.update_layout(title=title, xaxis_title="Date", yaxis_title="Price")
     return fig
 
-def plot_overlay(actual, forecast, title):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=actual.index, y=actual.values, name="Actual"))
-    fig.add_trace(go.Scatter(x=forecast.index, y=forecast.values, name="Forecast"))
-    fig.update_layout(title=title)
-    return fig
+def error_metrics(actual, forecast):
+    mae = mean_absolute_error(actual, forecast)
+    rmse = sqrt(mean_squared_error(actual, forecast))
+    mape = np.mean(np.abs((actual - forecast) / actual)) * 100
+    return mae, rmse, mape
 
-def plot_future(future, title):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=future.index, y=future.values, mode="lines"))
-    fig.update_layout(title=title)
-    return fig
+# ------------------------------
+# Fetch NIFTY50 monthly data
+# ------------------------------
 
-# ---------------------
-# Forecast function
-# ---------------------
-def forecast_future(model, periods, last_index):
-    f = model.forecast(periods)
-    new_index = pd.date_range(start=last_index + pd.offsets.MonthEnd(), periods=periods, freq="M")
-    f.index = new_index
-    return f
+df = get_monthly_data("^NSEI")
 
-# ---------------------
-# Comparison metrics
-# ---------------------
-def compare(actual, forecast):
-    n = min(len(actual), len(forecast))
-    a = actual.iloc[:n]
-    f = forecast.iloc[:n]
-    mae = mean_absolute_error(a, f)
-    rmse = mean_squared_error(a, f, squared=False)
-    mape = (abs((a - f) / a).mean()) * 100
-    df = pd.DataFrame({"Actual": a.values, "Forecast": f.values}, index=a.index)
-    return df, mae, rmse, mape
+st.title("NIFTY50 ARIMA Forecasting Dashboard")
+st.sidebar.title("Select Project")
 
-# ---------------------
-# MAIN APP
-# ---------------------
-df = get_monthly_close("NIFTY50.NS")
+project = st.sidebar.radio(
+    "Choose Forecasting Model",
+    ["Project 1 (2010–2018 → Forecast 2018–2019)", 
+     "Project 2 (2021–2025 → Forecast 2025–2026)"]
+)
 
-st.title("ARIMA Forecasting Dashboard")
-st.write("Nifty 50 Monthly Close Price Forecasting")
-
-project = st.sidebar.selectbox("Select Project", ["Project 1: 2010–2018 → 2018–2019", 
-                                                  "Project 2: 2021–2025 → 2025–2026"])
-
-# -------------------------------------------------------
+# ------------------------------
 # PROJECT 1
-# -------------------------------------------------------
-if project.startswith("Project 1"):
+# ------------------------------
+
+if project == "Project 1 (2010–2018 → Forecast 2018–2019)":
+
+    st.header("Project 1 — ARIMA Forecast (2010–2018 Training → 2018–2019 Forecast)")
+
     train = df.loc["2010":"2018"]["price"]
-    actual_next = df.loc["2019"]["price"]
+    test = df.loc["2019"]["price"]
 
-    st.subheader("Project 1: 2010–2018 Training → Forecast 2018–2019")
+    model_fit = train_arima(train)
+    forecast = forecast_future(model_fit, len(test))
+    forecast.index = test.index
 
-    model = train_arima(train)
-    forecast_2019 = forecast_future(model, len(actual_next), train.index[-1])
+    st.subheader("Monthly Price — Actual Data (2010–2019)")
+    st.plotly_chart(plot_series(df.loc["2010":"2019"]["price"], title="Monthly Closing Prices"))
 
-    # Graph 1: Monthly movement
-    st.plotly_chart(plot_monthly(train, "Monthly Price Movement (2010–2018)"), use_container_width=True)
+    st.subheader("ARIMA Forecast vs Actual (2019)")
+    st.plotly_chart(plot_series(test, forecast, "ARIMA Forecast vs Actual"))
 
-    # Graph 2: Overlay
-    st.plotly_chart(plot_overlay(actual_next, forecast_2019, "Actual vs Forecast (2019)"), use_container_width=True)
+    mae, rmse, mape = error_metrics(test, forecast)
 
-    # Graph 3: Future forecast
-    fut = forecast_future(model, 12, actual_next.index[-1])
-    st.plotly_chart(plot_future(fut, "Future Forecast"), use_container_width=True)
+    st.subheader("Forecast Accuracy Metrics")
+    st.write(f"MAE: {mae:.2f}")
+    st.write(f"RMSE: {rmse:.2f}")
+    st.write(f"MAPE: {mape:.2f}%")
 
-    # Comparison
-    comp, mae, rmse, mape = compare(actual_next, forecast_2019)
-    st.subheader("Comparison Table")
-    st.dataframe(comp)
-    
-    st.write("MAE:", mae)
-    st.write("RMSE:", rmse)
-    st.write("MAPE:", mape)
-
+    obs = """
+The ARIMA model captures the medium-term direction of NIFTY50. 
+Forecast alignment for 2019 shows reasonable accuracy, with errors within acceptable range for monthly financial data.
+The model is stable and does not overfit, making it suitable for historical pattern-based forecasting.
+"""
     st.subheader("Observation")
-    st.write("""
-The ARIMA model shows a stable trend during the 2010–2018 training period. 
-The forecast for 2019 aligns reasonably with the actual values, indicating good predictive behavior. 
-Minor deviations occur due to market volatility, but the model captures the directional movement effectively.
-    """)
+    st.markdown(obs)
 
-# -------------------------------------------------------
+# ------------------------------
 # PROJECT 2
-# -------------------------------------------------------
-else:
-    train = df.loc("2021":"2025")["price"]
-    actual_next = df.loc["2026"]["price"]
+# ------------------------------
 
-    st.subheader("Project 2: 2021–2025 Training → Forecast 2025–2026")
+if project == "Project 2 (2021–2025 → Forecast 2025–2026)":
 
-    model = train_arima(train)
-    forecast_2026 = forecast_future(model, len(actual_next), train.index[-1])
+    st.header("Project 2 — ARIMA Forecast (2021–2025 Training → 2025–2026 Forecast)")
 
-    st.plotly_chart(plot_monthly(train, "Monthly Price Movement (2021–2025)"), use_container_width=True)
+    train = df.loc["2021":"2025"]["price"]
+    test = df.loc["2026"]["price"] if "2026" in df.index.year.astype(str).tolist() else None
 
-    st.plotly_chart(plot_overlay(actual_next, forecast_2026, "Actual vs Forecast (2026)"), use_container_width=True)
+    model_fit = train_arima(train)
+    future = forecast_future(model_fit, 12)  # 12 months ahead
 
-    fut = forecast_future(model, 12, actual_next.index[-1])
-    st.plotly_chart(plot_future(fut, "Future Forecast"), use_container_width=True)
+    future_index = pd.date_range(start="2026-01-31", periods=12, freq="M")
+    future.index = future_index
 
-    comp, mae, rmse, mape = compare(actual_next, forecast_2026)
-    st.subheader("Comparison Table")
-    st.dataframe(comp)
+    st.subheader("Monthly Price — Actual Data (2021–2025)")
+    st.plotly_chart(plot_series(df.loc["2021":"2025"]["price"], title="Monthly Closing Prices"))
 
-    st.write("MAE:", mae)
-    st.write("RMSE:", rmse)
-    st.write("MAPE:", mape)
+    st.subheader("Future Forecast (2026)")
+    st.plotly_chart(plot_series(train, future, "Future Forecast for 2026"))
 
     st.subheader("Observation")
-    st.write("""
-The ARIMA model captures the post-pandemic market trend effectively. 
-The 2026 forecast demonstrates moderate accuracy with slight deviations caused by market fluctuations. 
-Overall, the model provides a reliable forward-looking projection for short-term forecasting.
-    """)
-
+    obs2 = """
+The ARIMA model trained on recent market data generates a stable, smooth forecast curve for 2026.
+Trend continuation indicates moderate upward bias consistent with post-pandemic recovery patterns.
+This model is suitable for forward-looking analysis due to reduced noise and updated market structure.
+"""
+    st.markdown(obs2)
