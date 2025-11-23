@@ -1,8 +1,8 @@
-streamlit==1.40.0
-yfinance==0.2.52
-pandas==2.2.3
-numpy==1.26.4
-plotly==5.24.1
-statsmodels==0.14.2
-scikit-learn==1.5.2
-python-dateutil==2.8.2
+streamlit
+yfinance
+pandas
+numpy
+plotly
+statsmodels
+scikit-learn
+matplotlib
